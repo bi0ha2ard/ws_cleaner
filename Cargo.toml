@@ -3,6 +3,8 @@ name = "ws_cleaner"
 version = "0.1.0"
 edition = "2021"
 description = "Remove or ignore unused packages from ROS workspaces"
+readme = "README.md"
+license = "ISC"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
