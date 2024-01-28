@@ -8,7 +8,7 @@ use clap::ValueEnum;
 
 use crate::parsing::Entry;
 
-#[derive(ValueEnum, Debug, PartialEq, Clone, Default)]
+#[derive(ValueEnum, PartialOrd, PartialEq, Eq, Ord, Clone, Default, Debug)]
 pub enum DepType {
     #[default]
     All,
@@ -31,8 +31,8 @@ pub struct Dependency {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Package {
-    name: String,
-    path: PathBuf,
+    pub name: String,
+    pub path: PathBuf,
     deps: Vec<Dependency>,
 }
 
@@ -94,7 +94,9 @@ impl Dependency {
         candidate.dep_type.matches(&DepType::Build)
     }
 
-    pub fn matcher(types: Vec<DepType>) -> impl Fn(&Dependency) -> bool {
+    pub fn matcher(mut types: Vec<DepType>) -> impl Fn(&Dependency) -> bool {
+        types.sort();
+        types.dedup();
         move |candidate: &Dependency| types.iter().any(|t| t.matches(&candidate.dep_type))
     }
 }
@@ -122,7 +124,10 @@ pub fn find_unused_pkgs(
     let mut unused = HashMap::<&str, &Package>::new();
 
     for p in upstream {
-        unused.insert(&p.name, p);
+        // necessary in case the workspaces overlap.
+        if !build_space.contains(p) {
+            unused.insert(&p.name, p);
+        }
     }
 
     for &p in used.iter() {
@@ -139,6 +144,20 @@ pub fn find_unused_pkgs(
 mod tests {
     use crate::filtering::*;
 
+    fn test_package(name: &str, deps: &[&str]) -> Package {
+        Package {
+            name: name.to_string(),
+            path: "name".into(),
+            deps: deps
+                .iter()
+                .map(|n| Dependency {
+                    name: n.to_string(),
+                    dep_type: DepType::All,
+                })
+                .collect(),
+        }
+    }
+
     #[test]
     fn empty_needs_nothing() {
         let res = find_unused_pkgs(&[], &[], &Dependency::all);
@@ -147,24 +166,9 @@ mod tests {
 
     #[test]
     fn normal_dependencies() {
-        let ws = vec![Package {
-            name: "test".to_string(),
-            path: ".".into(),
-            deps: vec![Dependency {
-                name: "a".into(),
-                dep_type: DepType::All,
-            }],
-        }];
-        let a = Package {
-            name: "a".to_string(),
-            path: ".".into(),
-            deps: vec![],
-        };
-        let b = Package {
-            name: "b".to_string(),
-            path: ".".into(),
-            deps: vec![],
-        };
+        let ws = vec![test_package("test", &["a"])];
+        let a = test_package("a", &[]);
+        let b = test_package("b", &[]);
         let upstream = vec![a, b.clone()];
         let res = find_unused_pkgs(&ws, &upstream, &Dependency::all);
         assert_eq!(res, [b]);
@@ -223,5 +227,16 @@ mod tests {
         };
         let res = find_unused_pkgs(&ws, &[a.clone()], &Dependency::build);
         assert_eq!(res, [a]);
+    }
+
+    #[test]
+    fn overlaps() {
+        let a = test_package("a", &[]);
+        let b = test_package("b", &[]);
+        let c = test_package("c", &[]);
+        let d = test_package("d", &[]);
+        let ws = vec![a, b, c, d];
+        let res = find_unused_pkgs(&ws, &ws, &Dependency::all);
+        assert!(res.is_empty());
     }
 }

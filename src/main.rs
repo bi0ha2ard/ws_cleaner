@@ -1,42 +1,81 @@
-use std::path::PathBuf;
+#![feature(iterator_try_collect)]
+use std::{
+    fs::{OpenOptions, self},
+    io,
+    path::{Path, PathBuf},
+};
 
 use anyhow::*;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use ws_cleaner::{
-    filtering::{find_unused_pkgs, DepType, Dependency},
+    filtering::{find_unused_pkgs, DepType, Dependency, Package},
     parsing::find,
 };
 
+#[derive(ValueEnum, Clone, Debug)]
+enum Action {
+    /// Print all packages that are unused
+    Print,
+    /// Place a COLCON_IGNORE file
+    ColconIgnore,
+    /// Place a CATKIN_IGNORE file
+    CatkinIgnore,
+    /// Remove the package folder
+    Remove,
+}
+
+fn touch(path: &Path) -> Result<()> {
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(path)
+        .map(|_| {})
+        .with_context(|| format!("Could not create '{}'", path.display()))
+}
+
 #[derive(Parser)]
-#[command()]
+#[command(version, about, next_line_help(true))]
 struct Args {
-    /// Only log what would happen
-    #[arg(short, long, default_value_t = false)]
-    dry_run: bool,
-    /// Only consider these types
-    #[arg(value_name = "DEPENDENCY TYPE", short = 't', long = "type")]
-    dep_type: Vec<DepType>,
-    /// Upstream workspace to be filtered
+    /// Remove unused packages from this path (usually the upstream workspace)
     #[arg(short, long)]
     upstream: PathBuf,
-    /// Workspace for which to filter
+
+    /// Find packages whose dependencies to keep from these workspaces (multiple allowed)
     #[arg(short, long)]
-    workspace: Option<PathBuf>,
+    workspace: Vec<PathBuf>,
+
+    /// Only consider these types (multiple allowed)
+    #[arg(value_name = "DEPENDENCY TYPE", short = 't', long = "type")]
+    dep_type: Vec<DepType>,
+
+    /// Action to perform
+    #[arg(short, long, value_enum, default_value_t=Action::Print)]
+    action: Action,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let ws_path = args.workspace.unwrap_or(".".into());
-    println!(
-        "Filtering upsream workspace '{}' for workspace '{}'",
-        args.upstream.display(),
-        ws_path.display(),
-    );
-
-    // TODO: OK to leak full paths here?
-    let abs_ws = ws_path
-        .canonicalize()
-        .with_context(|| format!("Could not check workspace '{}'", ws_path.display()))?;
+    let mut ws_paths: Vec<PathBuf> = Vec::new();
+    if args.workspace.is_empty() {
+        println!(
+            "Removing packages not used by '.' from upsream workspace '{}'",
+            args.upstream.display(),
+        );
+        let default_path = PathBuf::from(".")
+            .canonicalize()
+            .with_context(|| "Invalid workspace: could not canonicalize path!")?;
+        ws_paths.push(default_path);
+    } else {
+        // TODO: OK to leak full paths here?
+        ws_paths = args
+            .workspace
+            .iter()
+            .map(|x| x.canonicalize())
+            .collect::<io::Result<Vec<PathBuf>>>()
+            .with_context(|| "Could not normalize workspaces")?;
+        ws_paths.sort();
+        ws_paths.dedup();
+    }
     let upstream_path = args.upstream.canonicalize().with_context(|| {
         format!(
             "Could not check upstream path '{}'",
@@ -44,32 +83,18 @@ fn main() -> anyhow::Result<()> {
         )
     })?;
 
-    if abs_ws == upstream_path {
-        return Err(anyhow!(
-            r#"Workspace and upstream must not be equal!
-  Workspace: '{}' -> '{}'
-  Upstream:  '{}' -> '{}'"#,
-            ws_path.display(),
-            abs_ws.display(),
-            args.upstream.display(),
-            upstream_path.display()
-        ));
-    }
+    let mut ws_pkgs: Vec<Package> = ws_paths
+        .iter()
+        .map(|x| find(x))
+        .try_collect::<Vec<Vec<Package>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
+    ws_pkgs.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+    ws_pkgs.dedup_by(|a, b| a.name.eq(&b.name));
 
-    if abs_ws.starts_with(&upstream_path) {
-        return Err(anyhow!(
-            r#"Workspace must not be contained in upstream!
-  Workspace: '{}' -> '{}'
-  Upstream:  '{}' -> '{}'"#,
-            ws_path.display(),
-            abs_ws.display(),
-            args.upstream.display(),
-            upstream_path.display()
-        ));
-    }
-
-    let ws_pkgs = find(&abs_ws)?;
-    let upstream_pks = find(&upstream_path)?;
+    let upstream_pks =
+        find(&upstream_path).with_context(|| "Could not enumerate upstream workspace")?;
     // TODO: could sort + dedup here too
     let need_filter = !args.dep_type.is_empty();
     // TODO: capture an iterator rather than moving the vector in?
@@ -92,12 +117,38 @@ fn main() -> anyhow::Result<()> {
         println!("{}", us_pkg);
     }
 
-    if args.dry_run {
-        println!("Dry-run!");
-    }
-    println!("\nRemoving:");
-    for unused in filtered {
-        println!("rm {}", unused);
+    match args.action {
+        Action::Print => {
+            println!("\nUnused:");
+            for unused in filtered {
+                println!("{}", unused);
+            }
+        }
+        Action::ColconIgnore => {
+            println!("\nSetting up colcon ignore for:");
+            for unused in filtered {
+                let mut p = unused.path.clone();
+                p.push("COLCON_IGNORE");
+                println!("Creating '{}'", p.display());
+                touch(&p)?;
+            }
+        }
+        Action::CatkinIgnore => {
+            println!("\nSetting up catkin ignore for:");
+            for unused in filtered {
+                let mut p = unused.path.clone();
+                p.push("CATKIN_IGNORE");
+                println!("Creating '{}'", p.display());
+                touch(&p)?;
+            }
+        }
+        Action::Remove => {
+            println!("\nRemoving:");
+            for unused in filtered {
+                println!("rm -r '{}'", unused.path.display());
+                fs::remove_dir_all(unused.path)?;
+            }
+        }
     }
 
     Ok(())
