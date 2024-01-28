@@ -212,11 +212,22 @@ mod tests {
         let ws = vec![Package {
             name: "test".to_string(),
             path: ".".into(),
-            deps: vec![Dependency {
-                name: "a".into(),
-                dep_type: DepType::Exec,
-            }],
+            deps: vec![
+                Dependency {
+                    name: "a".into(),
+                    dep_type: DepType::Exec,
+                },
+                Dependency {
+                    name: "b".into(),
+                    dep_type: DepType::Build,
+                },
+                Dependency {
+                    name: "c".into(),
+                    dep_type: DepType::All,
+                },
+            ],
         }];
+        // Should be marked unused
         let a = Package {
             name: "a".to_string(),
             path: ".".into(),
@@ -225,7 +236,19 @@ mod tests {
                 dep_type: DepType::Build,
             }],
         };
-        let res = find_unused_pkgs(&ws, &[a.clone()], &Dependency::build);
+        // Should be used
+        let b = Package {
+            name: "b".into(),
+            path: ".".into(),
+            deps: vec![],
+        };
+        // Should be used
+        let c = Package {
+            name: "c".into(),
+            path: ".".into(),
+            deps: vec![],
+        };
+        let res = find_unused_pkgs(&ws, &[a.clone(), b, c], &Dependency::build);
         assert_eq!(res, [a]);
     }
 
