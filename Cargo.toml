@@ -6,6 +6,12 @@ description = "Remove or ignore unused packages from ROS workspaces"
 readme = "README.md"
 license = "ISC"
 
+[profile.release]
+strip = true
+lto = true
+panic = 'abort'
+# opt-level = "z"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
