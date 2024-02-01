@@ -85,7 +85,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut ws_pkgs: Vec<Package> = ws_paths
         .iter()
-        .map(|x| find(x))
+        .map(|x| find(x).context("Could not enumerate workspace"))
         .try_collect::<Vec<Vec<Package>>>()?
         .into_iter()
         .flatten()
@@ -94,21 +94,22 @@ fn main() -> anyhow::Result<()> {
     ws_pkgs.dedup_by(|a, b| a.name.eq(&b.name) && a.path.eq(&b.path));
 
     let mut upstream_pks =
-        find(&upstream_path).with_context(|| "Could not enumerate upstream workspace")?;
+        find(&upstream_path).context("Could not enumerate upstream workspace")?;
     upstream_pks.sort_unstable_by(|a, b| a.name.cmp(&b.name).then(a.path.cmp(&b.path)));
     upstream_pks.dedup_by(|a, b| a.name.eq(&b.name) && a.path.eq(&b.path));
     let need_filter = !args.dep_type.is_empty();
     // TODO: capture an iterator rather than moving the vector in?
     let match_specified = Dependency::matcher(args.dep_type);
-    let filtered = find_unused_pkgs(
+    let mut filtered = find_unused_pkgs(
         &ws_pkgs,
         &upstream_pks,
         if need_filter {
-            &Dependency::all
-        } else {
             &match_specified
+        } else {
+            &Dependency::all
         },
     );
+    filtered.sort_unstable_by(|a, b| a.name.cmp(&b.name).then(a.path.cmp(&b.path)));
     println!("Workspace packages:");
     for ws_pkg in ws_pkgs {
         println!("{}", ws_pkg);
