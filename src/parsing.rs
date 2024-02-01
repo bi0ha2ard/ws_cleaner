@@ -46,12 +46,12 @@ fn check_path(dir: &Path) -> Result<SearchOutcome> {
         .try_exists()
         .with_context(|| format!("Wile trying to check '{}'", pkg_xml.display()))?
     {
-        return parse_package(&pkg_xml).map(Found);
+        return parse_package(dir, &pkg_xml).map(Found);
     }
     Ok(Recurse {})
 }
 
-fn parse_contents(path: &Path, reader: impl Read) -> Result<Package> {
+fn parse_contents(package_path: &Path, reader: impl Read) -> Result<Package> {
     let parser = EventReader::new(reader);
 
     let mut depth = 0;
@@ -129,7 +129,7 @@ fn parse_contents(path: &Path, reader: impl Read) -> Result<Package> {
             Ok(XmlEvent::EndElement { name }) => {
                 if tag_from_name(name.local_name.as_str()) != pending {
                     // All the tags we care about are depth 1
-                    return Err(anyhow!("Closing tag '{}' doesn't match opening tag '{:?}' in '{}'!", name, pending, path.display()));
+                    return Err(anyhow!("Closing tag '{}' doesn't match opening tag '{:?}' in '{}/package.xml'!", name, pending, package_path.display()));
                 } else {
                     pending = Pending::Other;
                 }
@@ -146,18 +146,18 @@ fn parse_contents(path: &Path, reader: impl Read) -> Result<Package> {
     let name = maybe_name.context("Field 'name' missing from package.xml")?;
     Ok(Package {
         name,
-        path: path.to_path_buf(),
+        path: package_path.to_path_buf(),
         deps,
     })
 }
 
-fn parse_package(xml_file: &PathBuf) -> Result<Package> {
+fn parse_package(pkg_root: &Path, xml_file: &PathBuf) -> Result<Package> {
     let context = || format!("While trying to parse '{}'", xml_file.display());
     let f = File::open(xml_file).with_context(context)?;
     // Prevent huge XML files blowing us up
     let reader = BufReader::new(f.take(1024 * 1024));
 
-    parse_contents(xml_file, reader)
+    parse_contents(pkg_root, reader)
 }
 
 fn find_packages(dir: &Path, results: &mut Vec<Package>, recurse: bool) -> anyhow::Result<()> {
