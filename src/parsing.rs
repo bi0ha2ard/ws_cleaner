@@ -56,7 +56,7 @@ fn parse_contents(path: &Path, reader: impl Read) -> Result<Package> {
 
     let mut depth = 0;
 
-    #[derive(PartialEq)]
+    #[derive(PartialEq, Debug)]
     enum Pending {
         Name,
         Depend,
@@ -91,7 +91,7 @@ fn parse_contents(path: &Path, reader: impl Read) -> Result<Package> {
                 if depth == 1 {
                     pending = tag_from_name(name.local_name.as_str());
                 }
-                if depth > 1 && pending != Pending::Other {
+                if depth != 1 && pending != Pending::Other {
                     return Err(anyhow!("Expected tag '{name}' at depth 1!"));
                 }
                 depth += 1;
@@ -129,7 +129,9 @@ fn parse_contents(path: &Path, reader: impl Read) -> Result<Package> {
             Ok(XmlEvent::EndElement { name }) => {
                 if tag_from_name(name.local_name.as_str()) != pending {
                     // All the tags we care about are depth 1
-                    return Err(anyhow!("Closing tag doesn't match opening tag!"));
+                    return Err(anyhow!("Closing tag '{}' doesn't match opening tag '{:?}' in '{}'!", name, pending, path.display()));
+                } else {
+                    pending = Pending::Other;
                 }
                 depth -= 1;
             }
