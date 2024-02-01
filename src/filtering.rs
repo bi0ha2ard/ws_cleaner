@@ -6,8 +6,6 @@ use std::{
 
 use clap::ValueEnum;
 
-use crate::parsing::Entry;
-
 #[derive(ValueEnum, PartialOrd, PartialEq, Eq, Ord, Clone, Default, Debug)]
 pub enum DepType {
     #[default]
@@ -25,61 +23,20 @@ impl DepType {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Dependency {
-    name: String,
-    dep_type: DepType,
+    pub name: String,
+    pub dep_type: DepType,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Package {
     pub name: String,
     pub path: PathBuf,
-    deps: Vec<Dependency>,
+    pub deps: Vec<Dependency>,
 }
 
 impl Display for Package {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} ({})", self.name, self.path.display())
-    }
-}
-
-impl From<Entry> for Package {
-    fn from(entry: Entry) -> Self {
-        let mut deps: Vec<_> = Vec::with_capacity(
-            entry.pkg.depend.len()
-                + entry.pkg.build_depend.len()
-                + entry.pkg.exec_depend.len()
-                + entry.pkg.test_depend.len(),
-        );
-        for x in entry.pkg.depend.iter() {
-            deps.push(Dependency {
-                name: x.clone(),
-                dep_type: DepType::All,
-            });
-        }
-        for x in entry.pkg.build_depend.iter() {
-            deps.push(Dependency {
-                name: x.clone(),
-                dep_type: DepType::Build,
-            });
-        }
-        for x in entry.pkg.exec_depend.iter() {
-            deps.push(Dependency {
-                name: x.clone(),
-                dep_type: DepType::Exec,
-            });
-        }
-        for x in entry.pkg.test_depend.iter() {
-            deps.push(Dependency {
-                name: x.clone(),
-                dep_type: DepType::Test,
-            });
-        }
-
-        Self {
-            name: entry.pkg.name,
-            path: entry.path,
-            deps,
-        }
     }
 }
 

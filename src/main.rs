@@ -1,6 +1,6 @@
 #![feature(iterator_try_collect)]
 use std::{
-    fs::{OpenOptions, self},
+    fs::{self, OpenOptions},
     io,
     path::{Path, PathBuf},
 };
@@ -90,12 +90,13 @@ fn main() -> anyhow::Result<()> {
         .into_iter()
         .flatten()
         .collect();
-    ws_pkgs.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-    ws_pkgs.dedup_by(|a, b| a.name.eq(&b.name));
+    ws_pkgs.sort_unstable_by(|a, b| a.name.cmp(&b.name).then(a.path.cmp(&b.path)));
+    ws_pkgs.dedup_by(|a, b| a.name.eq(&b.name) && a.path.eq(&b.path));
 
-    let upstream_pks =
+    let mut upstream_pks =
         find(&upstream_path).with_context(|| "Could not enumerate upstream workspace")?;
-    // TODO: could sort + dedup here too
+    upstream_pks.sort_unstable_by(|a, b| a.name.cmp(&b.name).then(a.path.cmp(&b.path)));
+    upstream_pks.dedup_by(|a, b| a.name.eq(&b.name) && a.path.eq(&b.path));
     let need_filter = !args.dep_type.is_empty();
     // TODO: capture an iterator rather than moving the vector in?
     let match_specified = Dependency::matcher(args.dep_type);
