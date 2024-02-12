@@ -27,7 +27,7 @@ enum Action {
 fn touch(path: &Path) -> Result<()> {
     OpenOptions::new()
         .create(true)
-        .write(true)
+        .append(true)
         .open(path)
         .map(|_| {})
         .with_context(|| format!("Could not create '{}'", path.display()))
@@ -41,8 +41,12 @@ struct Args {
     upstream: PathBuf,
 
     /// Find packages whose dependencies to keep from these workspaces (multiple allowed)
-    #[arg(short, long)]
+    #[arg(short, long, group = "target")]
     workspace: Vec<PathBuf>,
+
+    /// Filter against the given packages rather than the workspace (multiple allowed)
+    #[arg(short, long, group = "target")]
+    package: Vec<String>,
 
     /// Only consider these types (multiple allowed)
     #[arg(value_name = "DEPENDENCY TYPE", short = 't', long = "type")]
@@ -56,7 +60,7 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let mut ws_paths: Vec<PathBuf> = Vec::new();
-    if args.workspace.is_empty() {
+    if args.workspace.is_empty() && args.package.is_empty() {
         println!(
             "Removing packages not used by '.' from upsream workspace '{}'",
             args.upstream.display(),
@@ -65,7 +69,7 @@ fn main() -> anyhow::Result<()> {
             .canonicalize()
             .with_context(|| "Invalid workspace: could not canonicalize path!")?;
         ws_paths.push(default_path);
-    } else {
+    } else if !args.workspace.is_empty() {
         // TODO: OK to leak full paths here?
         ws_paths = args
             .workspace
@@ -83,6 +87,11 @@ fn main() -> anyhow::Result<()> {
         )
     })?;
 
+    let mut upstream_pks =
+        find(&upstream_path).context("Could not enumerate upstream workspace")?;
+    upstream_pks.sort_unstable_by(|a, b| a.name.cmp(&b.name).then(a.path.cmp(&b.path)));
+    upstream_pks.dedup_by(|a, b| a.name.eq(&b.name) && a.path.eq(&b.path));
+
     let mut ws_pkgs: Vec<Package> = ws_paths
         .iter()
         .map(|x| find(x).context("Could not enumerate workspace"))
@@ -93,10 +102,14 @@ fn main() -> anyhow::Result<()> {
     ws_pkgs.sort_unstable_by(|a, b| a.name.cmp(&b.name).then(a.path.cmp(&b.path)));
     ws_pkgs.dedup_by(|a, b| a.name.eq(&b.name) && a.path.eq(&b.path));
 
-    let mut upstream_pks =
-        find(&upstream_path).context("Could not enumerate upstream workspace")?;
-    upstream_pks.sort_unstable_by(|a, b| a.name.cmp(&b.name).then(a.path.cmp(&b.path)));
-    upstream_pks.dedup_by(|a, b| a.name.eq(&b.name) && a.path.eq(&b.path));
+    if !args.package.is_empty() {
+        for p in upstream_pks.iter() {
+            if args.package.iter().any(|package| p.name == *package) {
+                ws_pkgs.push(p.clone());
+            }
+        }
+    }
+
     let need_filter = !args.dep_type.is_empty();
     // TODO: capture an iterator rather than moving the vector in?
     let match_specified = Dependency::matcher(args.dep_type);
