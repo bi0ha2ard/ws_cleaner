@@ -110,6 +110,32 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    if ws_pkgs.is_empty() {
+        let mut ws_str = String::from("<none>");
+        {
+            let mut ws_iter = ws_paths.iter();
+            if let Some(w) = ws_iter.next() {
+                ws_str = w.to_string_lossy().to_string();
+            }
+            for w in ws_iter {
+                ws_str.push_str(", ");
+                ws_str.push_str(&w.to_string_lossy());
+            }
+        }
+        let mut pkg_str = "<none>";
+        {
+            let mut pkg_iter = args.package.iter();
+            if let Some(p) = pkg_iter.next() {
+                pkg_str = p;
+            }
+            for p in pkg_iter {
+                ws_str.push_str(", ");
+                ws_str.push_str(p);
+            }
+        }
+        return Err(anyhow!("The filtered workspace is empty! This would remove all packages. Check your command line!\nRequested workspace: {}\nRequested packages: {}", ws_str, pkg_str));
+    }
+
     let need_filter = !args.dep_type.is_empty();
     // TODO: capture an iterator rather than moving the vector in?
     let match_specified = Dependency::matcher(args.dep_type);
